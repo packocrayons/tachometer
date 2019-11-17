@@ -46,7 +46,6 @@ void setup() {
 	TIMSK1 |= (1 << OCIE1A);
 
   	sei();
-    Serial.begin(9600);
 
 }
 
@@ -58,6 +57,11 @@ int numDigits(int x){
 		x = x/10;
 	}
 	return (n + 1);
+}
+
+float getBatteryVoltage(){
+	float voltage = (analogRead(VOLTAGE_PIN) * VOLTAGE_DIVIDER_CONSTANT * AREF)/ 1024;
+	return voltage;
 }
 
 //these helper functions are arguably hacky, but straightforward
@@ -80,7 +84,8 @@ void idleMode(){
 	writeDataToEEPROM();
 }
 
-void lcdUpdate(){
+//everything else is globals for now because ISRs need to access it. 
+void lcdUpdate(float voltage){
 	static byte hglass = 0;
 
 	lcd.clear();
@@ -88,17 +93,22 @@ void lcdUpdate(){
 	lcd.print("RPM ");
 	lcd.print(RPM, DEC);
 
-	lcd.setCursor(LCD_WIDTH - numDigits(EEPROMData.totalHours), 0);
+	lcd.setCursor(LCD_WIDTH - (numDigits(EEPROMData.totalHours) + 2), 0);
+	lcd.write(hglass);
+	lcd.write(" ");
 	lcd.print(EEPROMData.totalHours, DEC);
-  	Serial.println(EEPROMData.totalMillis, DEC);
 
 	lcd.setCursor(0, 1);
 	lcd.print("MAX ");
 	lcd.print(MAXRPM, DEC);
 
+	//4 digits of float plus "VOL "
+	lcd.setCursor(LCD_WIDTH - (4 + 4), 1);
+	lcd.print("VOL ");
+	lcd.print(voltage, 4);
+
 	if (!idle){
-		lcd.setCursor(LCD_WIDTH - 1, 1);
-		lcd.write(hglass ^= 1);
+		hglass ^= 1;
 	}
 }
 
@@ -109,7 +119,7 @@ void loop() {
 			idleMode();
 		}
 
-		lcdUpdate();
+		lcdUpdate(getBatteryVoltage());
 
 		updateDisplay = 0;
 	}
@@ -126,7 +136,6 @@ SIGNAL(TIMER1_COMPA_vect){
 
 	unsigned long elapsedTime = (millis() - oldMillis);
   oldMillis += elapsedTime; 
-  Serial.println(oldMillis, DEC);
 	RPM = ((rotations / PULSES_PER_ROTATION) * ((uint32_t) 1000 * 60)) / (elapsedTime);
 	rotations = 0; //reset for next go around. Hopefully don't miss any between the last line and this one (math is hard)
 	if (RPM > MAXRPM){
