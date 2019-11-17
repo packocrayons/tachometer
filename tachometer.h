@@ -10,7 +10,8 @@
 #define LCD_WIDTH 20
 
 #define VOLTAGE_PIN 1
-#define VOLTAGE_DIVIDER_CONSTANT 10.0
+//TFW you can only afford 10% resistors
+#define VOLTAGE_DIVIDER_CONSTANT 10.845
 
 #define AREF 5
 
