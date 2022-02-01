@@ -1,5 +1,6 @@
-  #include <EEPROM.h>
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
+#include <math.h>
 #include "tachometer.h"
 
 struct EEPROMStruct EEPROMData;
@@ -49,6 +50,15 @@ void setup() {
 
 }
 
+int isValidInterrupt(){
+	static int lastMillis = millis();
+	if ((millis() - lastMillis) >= MIN_INTERRUPT_INTERVAL){
+		lastMillis = millis();
+		return 1;
+	}
+	return 0;
+}
+
 
 int numDigits(int x){
 	int n = 0;
@@ -84,8 +94,52 @@ void idleMode(){
 	writeDataToEEPROM();
 }
 
+int string_start_match(char* string, const char* string_to_match, int len){
+	char* i = string;
+  const char* j = string_to_match;
+	for(int k = 0; k < len; i++, j++, k++){
+		if (*i != *j) return 0;
+	}
+	return 1;
+} 
+
+void enable_gpvtg(){
+	Serial.print(ENABLE_GPVTG_STRING);
+}
+
+struct nmea_gpvtg parse_nmea_gpvtg(char* string){
+	struct nmea_gpvtg ret = {.TMG=NAN, .MTMG=NAN, .spd_kts=NAN, .spd_km=NAN, .cksum = 0};
+	if (string_start_match(string, (const char*) "$GPVTG", 5)){
+    char* i = string;
+		for (int j = 0, commas=0; commas < 9; j++, i++){
+			if (*i == ','){
+				switch(commas){
+					case 1:
+						ret.TMG = atof(i);
+						break;
+					case 3: 
+						ret.MTMG = atof(i);
+						break;
+					case 5:
+						ret.spd_kts = atof(i);
+						break;
+					case 7: ret.spd_km = atof(i);
+						break;
+					case 2: case 4: case 6: case 8:
+					default:
+						continue;
+				}
+				commas++;
+			}
+		}
+	}
+	return ret;
+}
+			
+		
+
 //everything else is globals for now because ISRs need to access it. 
-void lcdUpdate(float voltage){
+void lcdUpdate(float voltage, float spd){
 	static byte hglass = 0;
 
 	lcd.clear();
@@ -93,20 +147,20 @@ void lcdUpdate(float voltage){
 	lcd.print("RPM ");
 	lcd.print(RPM, DEC);
 
+	lcd.setCursor(LCD_WIDTH - (4 + 3), 0);
+	lcd.print("K/H");
+	lcd.print(spd, 4);
+
+	//4 digits of float plus "V"
+	lcd.setCursor(0, 1);
+	lcd.print(voltage, 4);
+	lcd.print("V");
+	
 	lcd.setCursor(LCD_WIDTH - (numDigits(EEPROMData.totalHours) + 2), 0);
 	lcd.write(hglass);
 	lcd.write(" ");
 	lcd.print(EEPROMData.totalHours, DEC);
-
-	lcd.setCursor(0, 1);
-	lcd.print("MAX ");
-	lcd.print(MAXRPM, DEC);
-
-	//4 digits of float plus "VOL "
-	lcd.setCursor(LCD_WIDTH - (4 + 4), 1);
-	lcd.print("VOL ");
-	lcd.print(voltage, 4);
-
+	
 	if (!idle){
 		hglass ^= 1;
 	}
@@ -114,12 +168,28 @@ void lcdUpdate(float voltage){
 
 void loop() {
 	//recommend a sleep here to avoid polling
+	struct nmea_gpvtg gpt_info, temp;
+	char nmea_string[80];
+	int nmea_iterator = 0;
+	while(Serial.available()){
+		char rbyte = (char) Serial.read();
+		if (rbyte == '$') nmea_iterator = 0;
+		if (rbyte == '\r') temp = parse_nmea_gpvtg(nmea_string);
+		nmea_string[nmea_iterator] = rbyte;
+	}
+	//if we got new data, update the main struct
+	if (temp.spd_km == NAN){
+		gpt_info = temp;
+		temp = (nmea_gpvtg) {NAN, NAN, NAN, NAN};
+		//update the display every time we get GPS data. This means there's no averaging so we'll see how it goes
+		updateDisplay = 1;
+	}
 	if (updateDisplay){
 		if (idle > SECONDS_TO_IDLE_MODE){
 			idleMode();
 		}
 
-		lcdUpdate(getBatteryVoltage());
+		lcdUpdate(getBatteryVoltage(), gpt_info.spd_km == NAN ? 0 : gpt_info.spd_km);
 
 		updateDisplay = 0;
 	}
@@ -149,5 +219,5 @@ SIGNAL(TIMER1_COMPA_vect){
 }	
 
 void rpmTrigger(){
-	rotations++;
+	if (isValidInterrupt()) rotations++;
 }
