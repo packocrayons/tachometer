@@ -1,4 +1,5 @@
 #define PHOTODIODE_PIN 2
+#define PHOTODIODE_EN  3
 //1 second interrupt fire
 #define OCR1A_val 15624
 //how long until we save to EEPROM
@@ -56,4 +57,17 @@ struct nmea_gpvtg{
 	float spd_kts;
 	float spd_km;
 	int cksum;
+};
+
+#define BIT_NORTH 0b00000001
+#define BIT_EAST  0b00000010
+#define BIT_GPSFIX 0b10000000
+struct nmea_gpgga{
+  float time_utc;
+  float lat;
+  float longitude;
+  uint8_t bitfields;
+  uint8_t num_sats;
+  float hdop;
+  float MSL_alt;
 };
